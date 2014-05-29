@@ -7,12 +7,14 @@ require 'RedBean/rb.php';
 \Slim\Slim::registerAutoloader();
 
 // set up database connection
-R::setup('mysql:host=localhost;dbname=slim','root','root');
+R::setup('mysql:host=localhost;dbname=slim', 'root', 'root');
 R::freeze(true);
 // initialize app
 $app = new \Slim\Slim();
 
-class ResourceNotFoundException extends Exception {}
+class ResourceNotFoundException extends Exception
+{
+}
 
 // handle GET requests for /articles/:id
 $app->get('/articles/:id', function ($id) use ($app) {
@@ -21,9 +23,23 @@ $app->get('/articles/:id', function ($id) use ($app) {
     $article = R::findOne('articles', 'id=?', array($id));
 
     if ($article) {
-      // if found, return JSON response
-      $app->response()->header('Content-Type', 'application/json');
-      echo json_encode(R::exportAll($article));
+      $mediaType = $app->request()->getMediaType();
+      if ($mediaType == 'application/xml') {
+        $app->response()->header('Content-Type', 'application/xml');
+        $xml = new SimpleXMLElement('<articles/>');
+        $result = R::exportAll($article);
+        foreach ($result as $r) {
+          $item = $xml->addChild('item');
+          $item->addChild('id', $r['id']);
+          $item->addChild('title', $r['title']);
+          $item->addChild('url', $r['url']);
+          $item->addChild('date', $r['date']);
+        }
+        echo $xml->asXml();
+      } else {
+        $app->response()->header('Content-Type', 'application/json');
+        echo json_encode(R::exportAll($article));
+      }
     } else {
       // else throw exception
       throw new ResourceNotFoundException();
@@ -41,37 +57,68 @@ $app->get('/articles/:id', function ($id) use ($app) {
 $app->get('/articles', function () use ($app) {
   // query database for all articles
   $articles = R::find('articles');
-
-  // send response header for JSON content type
-  $app->response()->header('Content-Type', 'application/json');
-
-  // return JSON-encoded response body with query results
-  echo json_encode(R::exportAll($articles));
+  $mediaType = $app->request()->getMediaType();
+  if ($mediaType == 'application/xml') {
+    $app->response()->header('Content-Type', 'application/xml');
+    $xml = new SimpleXMLElement('<articles/>');
+    $result = R::exportAll($articles);
+    foreach ($result as $r) {
+      $item = $xml->addChild('item');
+      $item->addChild('id', $r['id']);
+      $item->addChild('title', $r['title']);
+      $item->addChild('url', $r['url']);
+      $item->addChild('date', $r['date']);
+    }
+    echo $xml->asXml();
+  } else {
+    $app->response()->header('Content-Type', 'application/json');
+    echo json_encode(R::exportAll($articles));
+  }
 });
 
 // handle POST requests to /articles
-$app->post('/articles', function () use ($app) {
+$app->post('articles', function () use ($app) {
   try {
-    // get and decode JSON request body
+    // check request content type
+    // decode request body in JSON or XML format
     $request = $app->request();
+    $mediaType = $request->getMediaType();
     $body = $request->getBody();
-    $input = json_decode($body);
+    if ($mediaType == 'application/xml') {
+      $input = simplexml_load_string($body);
+    } elseif ($mediaType == 'application/json') {
+      $input = json_decode($body);
+    }
 
-    // store article record
+    // create and store article record
     $article = R::dispense('articles');
     $article->title = (string)$input->title;
     $article->url = (string)$input->url;
     $article->date = (string)$input->date;
     $id = R::store($article);
 
-    // return JSON-encoded response body
-    $app->response()->header('Content-Type', 'application/json');
-    echo json_encode(R::exportAll($article));
+    // return JSON/XML response
+    if ($mediaType == 'application/xml') {
+      $app->response()->header('Content-Type', 'application/xml');
+      $xml = new SimpleXMLElement('<root/>');
+      $result = R::exportAll($article);
+      foreach ($result as $r) {
+        $item = $xml->addChild('item');
+        $item->addChild('id', $r['id']);
+        $item->addChild('title', $r['title']);
+        $item->addChild('url', $r['url']);
+        $item->addChild('date', $r['date']);
+      }
+      echo $xml->asXml();
+    } elseif ($mediaType == 'application/json') {
+      $app->response()->header('Content-Type', 'application/json');
+      echo json_encode(R::exportAll($article));
+    }
   } catch (Exception $e) {
     $app->response()->status(400);
     $app->response()->header('X-Status-Reason', $e->getMessage());
   }
- });
+});
 
 $app->put('/articles/:id', function ($id) use ($app) {
   try {
