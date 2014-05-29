@@ -7,12 +7,56 @@ require 'RedBean/rb.php';
 \Slim\Slim::registerAutoloader();
 
 // set up database connection
-R::setup('mysql:host=localhost;dbname=slim','root','root');
+R::setup('mysql:host=localhost;dbname=slim', 'root', 'root');
 R::freeze(true);
 // initialize app
 $app = new \Slim\Slim();
 
-class ResourceNotFoundException extends Exception {}
+class ResourceNotFoundException extends Exception
+{
+}
+
+// route middleware for simple API authentication
+function authenticate(\Slim\Route $route)
+{
+  $app = \Slim\Slim::getInstance();
+  $uid = $app->getEncryptedCookie('uid');
+  $key = $app->getEncryptedCookie('key');
+  if (validateUserKey($uid, $key) === false) {
+    $app->halt(401);
+  }
+}
+
+function validateUserKey($uid, $key)
+{
+  if ($uid === 'batman' && $key === 'dark-knight') {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+$app->get('/cookie', function () use ($app) {
+  try {
+    $app->setEncryptedCookie('uid', 'batman', '10 minutes');
+    $app->setEncryptedCookie('key', 'dark-knight', '10 minutes');
+  } catch (Exception $e) {
+    $app->response()->status(400);
+    $app->response()->header('X-Status-Reason', $e->getMessage());
+  }
+});
+
+// handle GET requests for /articles
+$app->get('/articles', function () use ($app) {
+  // query database for all articles
+  $articles = R::find('articles');
+
+  // send response header for JSON content type
+  $app->response()->header('Content-Type', 'application/json');
+
+  // return JSON-encoded response body with query results
+  echo json_encode(R::exportAll($articles));
+});
 
 // handle GET requests for /articles/:id
 $app->get('/articles/:id', function ($id) use ($app) {
@@ -37,20 +81,8 @@ $app->get('/articles/:id', function ($id) use ($app) {
   }
 });
 
-// handle GET requests for /articles
-$app->get('/articles', function () use ($app) {
-  // query database for all articles
-  $articles = R::find('articles');
-
-  // send response header for JSON content type
-  $app->response()->header('Content-Type', 'application/json');
-
-  // return JSON-encoded response body with query results
-  echo json_encode(R::exportAll($articles));
-});
-
 // handle POST requests to /articles
-$app->post('/articles', function () use ($app) {
+$app->post('/articles', 'authenticate', function () use ($app) {
   try {
     // get and decode JSON request body
     $request = $app->request();
@@ -71,9 +103,9 @@ $app->post('/articles', function () use ($app) {
     $app->response()->status(400);
     $app->response()->header('X-Status-Reason', $e->getMessage());
   }
- });
+});
 
-$app->put('/articles/:id', function ($id) use ($app) {
+$app->put('/articles/:id', 'authenticate', function ($id) use ($app) {
   try {
     // get and decode JSON request body
     $request = $app->request();
@@ -104,7 +136,7 @@ $app->put('/articles/:id', function ($id) use ($app) {
 });
 
 // handle DELETE requests to /articles/:id
-$app->delete('/articles/:id', function ($id) use ($app) {
+$app->delete('/articles/:id', 'authenticate', function ($id) use ($app) {
   try {
     // query database for article
     $request = $app->request();
@@ -124,7 +156,6 @@ $app->delete('/articles/:id', function ($id) use ($app) {
     $app->response()->header('X-Status-Reason', $e->getMessage());
   }
 });
-
 
 // run
 $app->run();
