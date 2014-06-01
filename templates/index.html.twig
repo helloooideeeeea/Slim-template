@@ -54,7 +54,7 @@
         {% for comic in comics %}
         <div class="col-md-4">
               <h2> {{ comic.title }} </h2>
-                <img border="0" src={{ comic.comic_thumbnail }}  alt={{ comic.title }}>
+                <img border="0" src={{ comic.comic_thumbnail }} width="177" height="250" alt={{ comic.title }}>
                 <p><a class="btn btn-default" href="comics/{{ comic.id }}" role="button">読んでみる &raquo;</a></p>
         </div>
         {% endfor %}

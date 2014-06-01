@@ -17,10 +17,16 @@ class ResourceNotFoundException extends Exception
 }
 
 const SESSION_KEY = 'comic-service-auth';
-const COL_MAIL_ADDRESS = 'mail_address';
-const COL_PASSWORD = 'password';
-const COL_NICK_NAME = 'nick_name';
-const COL_USER_THUMBNAIL = 'user_thumbnail';
+const USERS_COL_MAIL_ADDRESS = 'mail_address';
+const USERS_COL_PASSWORD = 'password';
+const USERS_COL_NICK_NAME = 'nick_name';
+const USERS_COL_USER_THUMBNAIL = 'user_thumbnail';
+const COMICS_COL_MAIL_ADDRESS = 'mail_address';
+const COMICS_COL_TITLE = 'title';
+const COMICS_COL_COMIC_IMAGE = 'comic_image';
+const COMICS_COL_COMIC_THUMBNAIL = 'comic_thumbnail';
+const COMICS_COL_COMIC_RECOMMEND_COUNTS = 'recommend_counts';
+
 
 /**
  *
@@ -47,13 +53,13 @@ session_start();
 $app->post('/create-user', function () use ($app) {
   try {
     $request = $app->request();
-    $mailAddress = $request->post(COL_MAIL_ADDRESS);
-    $password = $request->post(COL_PASSWORD);
-    $nickName = $request->post(COL_NICK_NAME);
+    $mailAddress = $request->post(USERS_COL_MAIL_ADDRESS);
+    $password = $request->post(USERS_COL_PASSWORD);
+    $nickName = $request->post(USERS_COL_NICK_NAME);
     if (!isset($mailAddress) || !isset($password) || !isset($nickName)) {
       throw new ResourceNotFoundException;
     }
-    $userThumbnail = $request->post(COL_USER_THUMBNAIL);
+    $userThumbnail = $request->post(USERS_COL_USER_THUMBNAIL);
     $users = R::dispense('users');
     $users->mail_address = (string)$mailAddress;
     $users->password = (string)$password;
@@ -73,6 +79,38 @@ $app->post('/create-user', function () use ($app) {
   }
 });
 
+$app->get('/register-comic', function () use ($app) {
+   $app->render('comic-register.html.twig');
+});
+
+$app->post('/register-comic', function () use ($app) {
+  try {
+    $request = $app->request();
+    $title = $request->post(COMICS_COL_TITLE);
+    $comicImage = $request->post(COMICS_COL_COMIC_IMAGE);
+    $comicThumbnail = $request->post(COMICS_COL_COMIC_THUMBNAIL);
+
+    if (!isset($title) || !isset($comicImage) || !isset($comicThumbnail)) {
+      throw new ResourceNotFoundException;
+    }
+
+    $comics = R::dispense('comics');
+    $comics->mail_address = 'hoge@gmail.com';
+    $comics->title = (string)$title;
+    $comics->comic_image = (string)$comicImage;
+    $comics->comic_thumbnail = (string)$comicThumbnail;
+    $comics->created_at = null;
+    $id = R::store($comics);
+    $app->redirect('/');
+  } catch (ResourceNotFoundException $e) {
+    $app->response()->status(400);
+    $app->response()->header('X-Status-Reason', $e->getMessage());
+  } catch(Exception $e) {
+    $app->response()->status(400);
+    $app->response()->header('X-Status-Reason', $e->getMessage());
+  }
+});
+
 /**
  * login認証
  * loginに成功した場合、SessionIDを設定し /へ
@@ -81,8 +119,8 @@ $app->post('/create-user', function () use ($app) {
 $app->post('/login', function () use ($app) {
   try {
     $request = $app->request();
-    $mailAddress = $request->post(COL_MAIL_ADDRESS);
-    $password = $request->post(COL_PASSWORD);
+    $mailAddress = $request->post(USERS_COL_MAIL_ADDRESS);
+    $password = $request->post(USERS_COL_PASSWORD);
     /* SQLインジェクションの可能性あり */
     $user = R::findOne('users', 'mail_address=? && password=?', array($mailAddress, $password));
     if ($user) {
