@@ -52,12 +52,18 @@ function authenticate(\Slim\Route $route)
 }
 
 /**
+ *
+ * @param $accountHash
+ */
+function setSession($accountHash) {
+  $_SESSION[SESSION_KEY] = $accountHash;
+}
+/**
  * 2週間有効なCookieをセットする
  * @param $app
  * @param $accountHash
  */
-function setAuthCookie(\Slim\Slim $app, $accountHash) {
-  $_SESSION[SESSION_KEY] = $accountHash;
+function setAutoLoginCookie(\Slim\Slim $app, $accountHash) {
   $app->setCookie(session_name(), $accountHash, time()+3600*24*14);
 }
 
@@ -105,7 +111,7 @@ $app->post('/sign-up', function () use ($app) {
       $users->user_thumbnail = $userThumbnail;
     }
     $id = R::store($users);
-    setAuthCookie($app, $accountHash);
+    setSession($app, $accountHash);
     $app->redirect('/comics');
   } catch (ValidationCheckErrorException $e) {
     /* エラーメッセージも */
@@ -133,6 +139,7 @@ $app->post('/sign-in', function () use ($app) {
     $request = $app->request();
     $mailAddress = $request->post(USERS_COL_MAIL_ADDRESS);
     $password = $request->post(USERS_COL_PASSWORD);
+    $autoLoginCheckBox = $request->post('memory');
     /* SQLインジェクションの可能性あり */
     $user = R::findOne(
       'users',
@@ -142,7 +149,10 @@ $app->post('/sign-in', function () use ($app) {
 
     if ($user) {
       $accountHash = $user[USERS_COL_ACCOUNT_HASH];
-      setAuthCookie($app, $accountHash);
+      setSession($accountHash);
+      if ($autoLoginCheckBox === true) {
+        setAutoLoginCookie($app, $accountHash);
+      }
       /* ログイン認証成功ページ */
       $app->redirect('/comics');
     } else {
