@@ -10,3 +10,6 @@ INSERT INTO `comments` (`comics_id`, `users_id`, `comment`, `created_at`) VALUES
 (1, 1, 'すごく楽しい！続編希望！', null);
 INSERT INTO `comments` (`comics_id`, `users_id`, `comment`, `created_at`) VALUES 
 (2, 2, 'すごく楽しい！続編希望！', null);
+INSERT INTO `tokens` (`token_name`, `mail_address`, `password`, `nick_name`, `user_thumbnail`, `expire_at`, `created_at`) VALUES 
+('23855aaf799f7cbeb93fae01a3778389', 'hogehoge@gmail.com', 'hogehoge', 'nick', null, '2014-06-15 10:00:00', null);
+

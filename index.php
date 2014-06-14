@@ -7,14 +7,24 @@ require 'Twig/lib/Twig/Autoloader.php';
 Twig_Autoloader::register();
 /* O/Rマッパー */
 require 'RedBean/rb.php';
+/* Mail */
+require_once 'lib/mail.php';
 
 // set up database connection
 R::setup('mysql:host=localhost;dbname=comic_service', 'root', 'root');
 R::freeze(true);
 
-class ResourceNotFoundException extends Exception{}
-class ValidationCheckErrorException extends Exception{}
-class AuthenticationErrorException  extends Exception{}
+class ResourceNotFoundException extends Exception
+{
+}
+
+class ValidationCheckErrorException extends Exception
+{
+}
+
+class AuthenticationErrorException extends Exception
+{
+}
 
 const SESSION_KEY = 'comic-service-auth';
 const USERS_COL_MAIL_ADDRESS = 'mail_address';
@@ -27,6 +37,12 @@ const COMICS_COL_TITLE = 'title';
 const COMICS_COL_COMIC_IMAGE = 'comic_image';
 const COMICS_COL_COMIC_THUMBNAIL = 'comic_thumbnail';
 const COMICS_COL_COMIC_RECOMMEND_COUNTS = 'recommend_counts';
+const TOKEN_COL_TOKEN_NAME = 'token_name';
+const TOKEN_COL_MAIL_ADDRESS = 'mail_address';
+const TOKEN_COL_PASSWORD = 'password';
+const TOKEN_COL_NICK_NAME = 'nick_name';
+const TOKEN_COL_USER_THUMBNAIL = 'user_thumbnail';
+const TOKEN_COL_EXPIRE_AT = 'expire_at';
 
 
 $app = new \Slim\Slim(array(
@@ -46,36 +62,41 @@ function authenticate(\Slim\Route $route)
   $app = \Slim\Slim::getInstance();
   $accountHash = $app->getCookie(session_name());
   if (!isset($_SESSION[SESSION_KEY])
-    || $_SESSION[SESSION_KEY] !== $accountHash) {
+    || $_SESSION[SESSION_KEY] !== $accountHash
+  ) {
     $app->redirect("/");
   }
 }
 
 /**
- *
+ * セッションをセットする
  * @param $accountHash
  */
-function setSession($accountHash) {
+function setSession($accountHash)
+{
   $_SESSION[SESSION_KEY] = $accountHash;
 }
+
 /**
  * 2週間有効なCookieをセットする
  * @param $app
  * @param $accountHash
  */
-function setAutoLoginCookie(\Slim\Slim $app, $accountHash) {
-  $app->setCookie(session_name(), $accountHash, time()+3600*24*14);
+function setAutoLoginCookie(\Slim\Slim $app, $accountHash)
+{
+  $app->setCookie(session_name(), $accountHash, time() + 3600 * 24 * 14);
 }
 
 /**
  * WebAPI認証(ヘッダー認証)
  * @param \Slim\Route $route
  */
-function apiAuthenticate(\Slim\Route $route) {
+function apiAuthenticate(\Slim\Route $route)
+{
   $app = Slim\Slim::getInstance();
   $header = getallheaders();
-  if(!isset($header['Authorization']) || $header['Authorization'] !== 'hogehoge') {
-    $app->halt(401,'Authorization Error');
+  if (!isset($header['Authorization']) || $header['Authorization'] !== 'hogehoge') {
+    $app->halt(401, 'Authorization Error');
   };
 }
 
@@ -87,32 +108,76 @@ $app->get('/sign-up', function () use ($app) {
 });
 
 /**
- * ユーザを作成する
+ * ワンタイムURLでアクセスした際、ユーザを作成する
+ */
+$app->get('/sign-up/:id', function ($id) use ($app) {
+  try {
+    $token = R::findOne('tokens', TOKEN_COL_TOKEN_NAME . '=?', array($id));
+    if ($token) {
+      if (time($token[TOKEN_COL_EXPIRE_AT]) >= time()) {
+        $accountHash = md5(uniqid(rand(), TRUE));
+        /* Usersテーブルにユーザ追加 */
+        $users = R::dispense('users');
+        $users->mail_address = (string)$token[TOKEN_COL_MAIL_ADDRESS];
+        $users->password = (string)$token[TOKEN_COL_PASSWORD];
+        $users->nick_name = (string)$token[TOKEN_COL_NICK_NAME];
+        $users->account_hash = $accountHash;
+        if (isset($token[TOKEN_COL_USER_THUMBNAIL])) {
+          $users->user_thumbnail = (string)$token[TOKEN_COL_USER_THUMBNAIL];
+        }
+        $users->created_at = null;
+        $users->last_login_at = null;
+        $id = R::store($users);
+
+        /* Tokenテーブルのレコード削除 */
+        R::trash($token);
+        setSession($app, $accountHash);
+        $app->render('email-sign-in.html.twig');
+      } else {
+        R::trash($token);
+        /* 有効期限が切れている */
+        $app->render('email-expired.html.twig');
+      }
+    } else {
+      /* Tokenが存在しない */
+      $app->halt(401, 'Error');
+    }
+  } catch (Exception $e) {
+    $app->response()->status(400);
+    $app->response()->header('X-Status-Reason', $e->getMessage());
+  }
+});
+
+/**
+ * トークンを作成し、メール送信
  */
 $app->post('/sign-up', function () use ($app) {
   try {
     $request = $app->request();
-    $mailAddress = $request->post(USERS_COL_MAIL_ADDRESS);
-    $password = $request->post(USERS_COL_PASSWORD);
-    $nickName = $request->post(USERS_COL_NICK_NAME);
+    $mailAddress = $request->post(TOKEN_COL_MAIL_ADDRESS);
+    $password = $request->post(TOKEN_COL_PASSWORD);
+    $nickName = $request->post(TOKEN_COL_NICK_NAME);
     if (!isset($mailAddress) || !isset($password) || !isset($nickName)) {
       throw new ValidationCheckErrorException;
     }
-    $userThumbnail = $request->post(USERS_COL_USER_THUMBNAIL);
-    $accountHash = md5(uniqid(rand(),TRUE));
-    $users = R::dispense('users');
-    $users->mail_address = (string)$mailAddress;
-    $users->password = (string)$password;
-    $users->nick_name = (string)$nickName;
-    $users->account_hash = (string)$accountHash;
-    $users->created_at = null;
-    $users->last_login_at = null;
+    $userThumbnail = $request->post(TOKEN_COL_USER_THUMBNAIL);
+    $tokenName = md5(uniqid(rand(), TRUE));
+    $token = R::dispense('token');
+    $token->token_name = (string)$tokenName;
+    $token->mail_address = (string)$mailAddress;
+    $token->password = (string)$password;
+    $token->nick_name = (string)$nickName;
     if (isset($userThumbnail)) {
-      $users->user_thumbnail = $userThumbnail;
+      $token->user_thumbnail = $userThumbnail;
     }
-    $id = R::store($users);
-    setSession($app, $accountHash);
-    $app->redirect('/comics');
+    /* トークンの有効期限を６時間に設定する */
+    $token->expire_at = date("Y-m-d H:i:s", strtotime('+6 hours'));
+    $token->created_at = null;
+    $id = R::store($token);
+
+    /* Mail送信 */
+    send_token_mail($mailAddress, $tokenName);
+    $app->render('email-post.html.twig');
   } catch (ValidationCheckErrorException $e) {
     /* エラーメッセージも */
     $app->render('/sign-up');
@@ -143,7 +208,7 @@ $app->post('/sign-in', function () use ($app) {
     /* SQLインジェクションの可能性あり */
     $user = R::findOne(
       'users',
-      USERS_COL_MAIL_ADDRESS.'=? && '.USERS_COL_PASSWORD.'=?',
+      USERS_COL_MAIL_ADDRESS . '=? && ' . USERS_COL_PASSWORD . '=?',
       array($mailAddress, $password)
     );
 
@@ -184,7 +249,7 @@ $app->post('/sign-out', function () use ($app) {
   /** セッションを切断するにはセッションクッキーも削除する。 */
   $cookie = $app->getCookie(session_name());
   if ($cookie) {
-    $app->setcookie(session_name(), '', time()-42000, '/');
+    $app->setcookie(session_name(), '', time() - 42000, '/');
   }
   /** セッションを破壊する */
   session_destroy();
@@ -194,10 +259,10 @@ $app->post('/sign-out', function () use ($app) {
 /**
  * マイページ
  */
-$app->get('/account', 'authenticate' , function () use ($app) {
+$app->get('/account', 'authenticate', function () use ($app) {
   try {
-    $user = R::findOne('users', USERS_COL_ACCOUNT_HASH.'=?', array($_SESSION[SESSION_KEY]));
-    if($user) {
+    $user = R::findOne('users', USERS_COL_ACCOUNT_HASH . '=?', array($_SESSION[SESSION_KEY]));
+    if ($user) {
       $app->render('account.html.twig', array("user" => $user));
     } else {
       throw new AuthenticationErrorException;
@@ -215,7 +280,7 @@ $app->get('/account', 'authenticate' , function () use ($app) {
  * コミック登録画面
  */
 $app->get('/register-comic', 'authenticate', function () use ($app) {
-   $app->render('comic-register.html.twig');
+  $app->render('comic-register.html.twig');
 });
 
 /**
@@ -230,8 +295,8 @@ $app->post('/register-comic', 'authenticate', function () use ($app) {
     if (!isset($title) || !isset($comicImage) || !isset($comicThumbnail)) {
       throw new ValidationCheckErrorException;
     }
-    $user = R::findOne('users', USERS_COL_ACCOUNT_HASH.'=?', array($_SESSION[SESSION_KEY]));
-    if(!$user) {
+    $user = R::findOne('users', USERS_COL_ACCOUNT_HASH . '=?', array($_SESSION[SESSION_KEY]));
+    if (!$user) {
       throw new AuthenticationErrorException;
     }
     $comics = R::dispense('comics');
@@ -249,7 +314,7 @@ $app->post('/register-comic', 'authenticate', function () use ($app) {
   } catch (AuthenticationErrorException $e) {
     $app->response()->status(400);
     $app->response()->header('X-Status-Reason', $e->getMessage());
-  } catch(Exception $e) {
+  } catch (Exception $e) {
     $app->response()->status(400);
     $app->response()->header('X-Status-Reason', $e->getMessage());
   }
@@ -307,7 +372,7 @@ $app->get('/api/comics', 'apiAuthenticate', function () use ($app) {
 /**
  * コミックス詳細API(Json)
  */
-$app->get('/api/comics/:id','apiAuthenticate', function ($id) use ($app) {
+$app->get('/api/comics/:id', 'apiAuthenticate', function ($id) use ($app) {
   try {
     // query database for single article
     $comics = R::findOne('comics', 'id=?', array($id));
@@ -331,7 +396,7 @@ $app->get('/api/comics/:id','apiAuthenticate', function ($id) use ($app) {
 /**
  * ニックネーム検索API
  */
-$app->get('/api/search-nickname/:nickName', 'apiAuthenticate',function ($nickName) use ($app) {
+$app->get('/api/search-nickname/:nickName', 'apiAuthenticate', function ($nickName) use ($app) {
   try {
     $users = R::findOne('users', 'nick_name=?', array($nickName));
     if ($users) {
